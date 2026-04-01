@@ -57,6 +57,9 @@ defmodule Hermes.Server.Handlers.Tools do
 
       {:error, %Error{} = error, frame} ->
         {:error, error, frame}
+
+      {:defer, ref, opts, frame} ->
+        {:defer, ref, opts, frame}
     end
   end
 
@@ -70,6 +73,9 @@ defmodule Hermes.Server.Handlers.Tools do
 
       {:error, %Error{} = error, frame} ->
         {:error, error, frame}
+
+      {:defer, ref, opts, frame} ->
+        {:defer, ref, opts, frame}
     end
   end
 

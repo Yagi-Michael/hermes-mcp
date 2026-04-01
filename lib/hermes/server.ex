@@ -138,6 +138,7 @@ defmodule Hermes.Server do
   @callback handle_tool_call(name :: String.t(), arguments :: map(), Frame.t()) ::
               {:reply, result :: term(), Frame.t()}
               | {:error, mcp_error(), Frame.t()}
+              | {:defer, ref :: reference(), opts :: map(), Frame.t()}
 
   @doc """
   Handles a resource read request.
@@ -880,5 +881,49 @@ defmodule Hermes.Server do
     pid = registry.whereis_server(server)
     send(pid, {:send_roots_request, timeout})
     :ok
+  end
+
+  # Deferred Reply API
+
+  @doc """
+  Resolves a previously deferred tool call reply.
+
+  When a `handle_tool_call/3` callback returns `{:defer, ref, opts, frame}`, the
+  transport caller blocks naturally (via GenServer call semantics) until this function
+  is called with the same `ref`.
+
+  The `response` map should contain either a `"result"` key (for success) or an
+  `"error"` key (for errors). If a plain map is provided, it is wrapped as
+  `%{"result" => response}`.
+
+  Calling this function with a `ref` that has already been resolved or cancelled
+  is a no-op (one-shot idempotent).
+
+  ## Examples
+
+      # From within a process that received the ref
+      Hermes.Server.deferred_reply(server, ref, %{"result" => %{"content" => [...]}})
+
+      # Or resolve with an error
+      Hermes.Server.deferred_reply(server, ref, %{"error" => %{"code" => -1, "message" => "failed"}})
+  """
+  @spec deferred_reply(GenServer.server(), reference(), map()) :: :ok
+  def deferred_reply(server, ref, response) when is_reference(ref) and is_map(response) do
+    GenServer.cast(server, {:deferred_reply, ref, response})
+  end
+
+  @doc """
+  Cancels a previously deferred tool call reply.
+
+  The transport caller receives `{:error, :cancelled}` and the session request
+  is completed. If a `cancel_notify` pid was specified in the defer opts, it
+  receives a `{:deferred_cancelled, ref}` message.
+
+  Calling this function with a `ref` that has already been resolved or cancelled
+  is a no-op (one-shot idempotent).
+  """
+  @spec cancel_deferred(GenServer.server(), reference()) :: :ok
+  def cancel_deferred(server, ref) when is_reference(ref) do
+    GenServer.cast(server, {:cancel_deferred, ref})
   end
 end

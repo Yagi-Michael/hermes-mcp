@@ -185,6 +185,91 @@ defmodule Hermes.Server.DeferredReplyTest do
       refute Map.has_key?(state.deferred_replies, ref)
     end
 
+    test "session crash triggers sweep, cleans up deferred entry, and notifies cancel_notify", %{
+      server: server,
+      session_id: session_id
+    } do
+      _task =
+        spawn(fn ->
+          request =
+            build_request("tools/call", %{
+              "name" => "deferred_tool_with_cancel",
+              "arguments" => %{}
+            })
+
+          GenServer.call(server, {:request, request, session_id, %{}})
+        end)
+
+      # Wait for the deferred reply to be registered
+      assert_receive {:deferred_registered, ref}, 1000
+
+      # Verify it's tracked
+      state = :sys.get_state(server)
+      assert Map.has_key?(state.deferred_replies, ref)
+
+      # Kill the session process directly to simulate a crash
+      session_pid = Hermes.Server.Registry.whereis_server_session(DeferredStubServer, session_id)
+      assert is_pid(session_pid)
+      Process.exit(session_pid, :kill)
+
+      # Wait for the DOWN to be processed by the Base GenServer
+      Process.sleep(100)
+
+      # cancel_notify should receive notification
+      assert_receive {:deferred_cancelled, ^ref}, 1000
+
+      # Deferred entry should be cleaned up
+      state = :sys.get_state(server)
+      refute Map.has_key?(state.deferred_replies, ref)
+
+      # Server should still be alive
+      assert Process.alive?(server)
+    end
+
+    test "notifications/cancelled for deferred request unblocks caller and notifies cancel_notify",
+         %{server: server, session_id: session_id} do
+      # Build the request ahead of time so we know the request_id
+      request =
+        build_request("tools/call", %{
+          "name" => "deferred_tool_with_cancel",
+          "arguments" => %{}
+        })
+
+      request_id = request["id"]
+
+      task =
+        Task.async(fn ->
+          GenServer.call(server, {:request, request, session_id, %{}})
+        end)
+
+      # Wait for the deferred reply to be registered
+      assert_receive {:deferred_registered, _ref}, 1000
+
+      # Verify the deferred entry is present
+      state = :sys.get_state(server)
+      assert Enum.any?(state.deferred_replies, fn {_ref, entry} -> entry.request_id == request_id end)
+
+      # Send a notifications/cancelled for the same request_id
+      notification =
+        build_notification("notifications/cancelled", %{
+          "requestId" => request_id,
+          "reason" => "user cancelled"
+        })
+
+      GenServer.cast(server, {:notification, notification, session_id, %{}})
+
+      # The blocked caller should get an error
+      response = Task.await(task, 2000)
+      assert {:error, :cancelled} = response
+
+      # cancel_notify pid should receive notification
+      assert_receive {:deferred_cancelled, _ref}, 1000
+
+      # Deferred entry should be cleaned up
+      state = :sys.get_state(server)
+      refute Enum.any?(state.deferred_replies, fn {_ref, entry} -> entry.request_id == request_id end)
+    end
+
     test "server_pid is available in frame private", %{
       server: server,
       session_id: session_id

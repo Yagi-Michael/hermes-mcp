@@ -134,11 +134,24 @@ defmodule Hermes.Server do
   This callback handles both module-based components (registered with `component`) and
   runtime components (registered with `Frame.register_tool/3`). For module-based tools,
   the framework automatically generates pattern-matched clauses during compilation.
+
+  ## Deferred replies
+
+  Returning `{:defer, ref, opts, frame}` suspends the transport caller until
+  `Hermes.Server.deferred_reply/3` or `Hermes.Server.cancel_deferred/2` is called
+  with the same `ref`.
+
+  The `opts` map accepts:
+
+    * `:cancel_notify` (`t:pid/0 | nil`) — if set, this pid receives
+      `{:deferred_cancelled, ref}` whenever the deferred reply is cancelled,
+      either explicitly via `cancel_deferred/2`, via a `notifications/cancelled`
+      message from the client, or because the original caller process died.
   """
   @callback handle_tool_call(name :: String.t(), arguments :: map(), Frame.t()) ::
               {:reply, result :: term(), Frame.t()}
               | {:error, mcp_error(), Frame.t()}
-              | {:defer, ref :: reference(), opts :: map(), Frame.t()}
+              | {:defer, ref :: reference(), opts :: %{optional(:cancel_notify) => pid() | nil}, Frame.t()}
 
   @doc """
   Handles a resource read request.

@@ -303,9 +303,7 @@ defmodule Hermes.Server.DeferredReplyTest do
 
     start_supervised!(Hermes.Server.Registry)
 
-    start_supervised!(
-      {Session.Supervisor, server: DeferredStubServer, registry: Hermes.Server.Registry}
-    )
+    start_supervised!({Session.Supervisor, server: DeferredStubServer, registry: Hermes.Server.Registry})
 
     transport = start_supervised!(StubTransport)
 
